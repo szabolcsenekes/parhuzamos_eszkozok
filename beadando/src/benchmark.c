@@ -209,7 +209,7 @@ void save_benchmark_csv(const char *filename,
  */
 void run_automated_benchmarks(const char *filename)
 {
-    int test_iterations[] = {100, 500, 1000, 2000};
+    int test_iterations[] = {10, 50, 100, 500, 1000, 2000, 5000, 10000};
     int test_count = sizeof(test_iterations) / sizeof(test_iterations[0]);
 
     ensure_csv_header(filename);
@@ -248,9 +248,9 @@ void run_automated_benchmarks(const char *filename)
  */
 void run_multi_size_benchmarks(const char *filename)
 {
-    int sizes[] = {256, 512, 1024};
+    int sizes[] = {64, 128, 256, 512, 1024};
     int iterations = 500;
-    int runs = 100;
+    int runs = 200;
 
     int count = sizeof(sizes) / sizeof(sizes[0]);
 
