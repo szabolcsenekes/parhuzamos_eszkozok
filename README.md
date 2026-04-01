@@ -3,21 +3,21 @@
 ## Projekt áttekintés
 
 A projekt egy 2 dimenziós hőterjedési szimulációt valósít meg C
-nyelven.\
+nyelven.
 A számítás kétféleképpen történik: - Szekvenciális CPU megoldással -
 Párhuzamos OpenCL (GPU) megoldással
 
-A cél a két megközelítés teljesítményének összehasonlítása.\
+A cél a két megközelítés teljesítményének összehasonlítása.
 A szimuláció valós időben jelenik meg SDL2 segítségével.
 
 ------------------------------------------------------------------------
 
 ## Célkitűzések
 
--   Hőterjedési modell implementálása 2D rácson\
--   Szekvenciális CPU verzió készítése\
--   Párhuzamos OpenCL verzió megvalósítása\
--   Teljesítmény összehasonlítás\
+-   Hőterjedési modell implementálása 2D rácson
+-   Szekvenciális CPU verzió készítése
+-   Párhuzamos OpenCL verzió megvalósítása
+-   Teljesítmény összehasonlítás
 -   Interaktív megjelenítés
 
 ------------------------------------------------------------------------
@@ -28,8 +28,8 @@ A modell egy 2D rácson alapul, ahol minden cella egy hőmérséklet értéket
 tárol.
 
 Minden iterációban: - A cella új értéke a négy szomszéd (fel, le, bal,
-jobb) átlaga\
-- A szélső cellák hőmérséklete 0.0 (hideg peremfeltétel)\
+jobb) átlaga
+- A szélső cellák hőmérséklete 0.0 (hideg peremfeltétel)
 - A hőforrás cellák értéke állandóan 1.0
 
 Ez egy egyszerű hődiffúziós folyamatot modellez.
@@ -40,8 +40,8 @@ Ez egy egyszerű hődiffúziós folyamatot modellez.
 
 A párhuzamosítás OpenCL segítségével valósul meg.
 
--   Minden rácspontot egy OpenCL work-item számol\
--   A teljes rács egy 2D NDRange-ben fut\
+-   Minden rácspontot egy OpenCL work-item számol
+-   A teljes rács egy 2D NDRange-ben fut
 -   A GPU egyszerre sok cellát dolgoz fel
 
 A CPU verzió szekvenciális marad, és referenciaként szolgál.
@@ -50,10 +50,10 @@ A CPU verzió szekvenciális marad, és referenciaként szolgál.
 
 ## Felhasznált technológiák
 
--   C programozási nyelv\
--   OpenCL\
--   SDL2\
--   GCC / MinGW\
+-   C programozási nyelv
+-   OpenCL
+-   SDL2
+-   GCC / MinGW
 -   Makefile
 
 ------------------------------------------------------------------------
@@ -85,9 +85,9 @@ A CPU verzió szekvenciális marad, és referenciaként szolgál.
 
 ## Kezelés
 
--   `ESC` → kilépés\
--   `SPACE` → szünet / folytatás\
--   `R` → reset\
+-   `ESC` → kilépés
+-   `SPACE` → szünet / folytatás
+-   `R` → reset
 -   bal egérgomb → új hőforrás
 
 ------------------------------------------------------------------------
@@ -96,8 +96,8 @@ A CPU verzió szekvenciális marad, és referenciaként szolgál.
 
 A program automatikus méréseket végez:
 
--   CPU futási idő\
--   OpenCL futási idő\
+-   CPU futási idő
+-   OpenCL futási idő
 -   Gyorsulás (speedup)
 
 Az eredmények: `data/outputs.csv`
@@ -131,8 +131,8 @@ Az eredmények: `data/outputs.csv`
 ### Megfigyelések
 
 -   Kis méret esetén a GPU lassabb a magas inicializációs költségek
-    miatt\
--   Közepes mérettől kezdve a GPU előnybe kerül\
+    miatt
+-   Közepes mérettől kezdve a GPU előnybe kerül
 -   Nagy méretnél jelentős gyorsulás figyelhető meg
 
 ------------------------------------------------------------------------
@@ -148,8 +148,8 @@ Az eredmények: `data/outputs.csv`
 
 ### Megfigyelések
 
--   Kevés iterációnál a GPU nem hatékony\
--   Közepes iterációszámnál javul a teljesítmény\
+-   Kevés iterációnál a GPU nem hatékony
+-   Közepes iterációszámnál javul a teljesítmény
 -   Nagyon sok iterációnál a memória-másolás költsége dominálhat
 
 ------------------------------------------------------------------------
@@ -166,8 +166,8 @@ Az eredmények: `data/outputs.csv`
 
 ### Megfigyelések
 
--   A GPU overhead dominál kis problémaméreteknél\
--   A gyorsulás közel lineárisan nő a mérettel\
+-   A GPU overhead dominál kis problémaméreteknél
+-   A gyorsulás közel lineárisan nő a mérettel
 -   Nagy adathalmazok esetén a GPU jelentős előnyt biztosít
 
 ------------------------------------------------------------------------
@@ -185,9 +185,9 @@ Az eredmények: `data/outputs.csv`
 
 ## Összegzés
 
--   A GPU kis méretű problémáknál nem hatékony\
--   A teljesítményelőny a rácsméret növekedésével nő\
--   A legnagyobb mért gyorsulás \~6x volt\
+-   A GPU kis méretű problémáknál nem hatékony
+-   A teljesítményelőny a rácsméret növekedésével nő
+-   A legnagyobb mért gyorsulás ~6x volt
 -   A memória-kezelés és adatmásolás jelentős hatással van a
     teljesítményre
 
@@ -196,6 +196,6 @@ Az eredmények: `data/outputs.csv`
 ## Következtetés
 
 Az OpenCL alapú párhuzamosítás különösen nagy méretű rácsok esetén
-hatékony.\
+hatékony.
 A CPU implementáció kisebb problémák esetén versenyképesebb lehet,
 azonban a GPU jelentős gyorsulást biztosít nagy számítási igény mellett.
