@@ -10,7 +10,6 @@
 
 /*
  * Returns the current time in milliseconds.
- * Uses a high-resolution timer for accurate performance measurements.
  */
 double get_time_ms(void);
 

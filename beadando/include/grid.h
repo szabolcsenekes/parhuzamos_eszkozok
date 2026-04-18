@@ -4,38 +4,31 @@
 /*
  * Grid module
  *
- * Handles the simulation grid, including memory allocation,
- * initialization, reset, and user-defined heat sources.
+ * Encapsulates the simulation state, including dimensions,
+ * rendering scale, temperature buffers, and heat source map.
  */
 
-/* Simulation dimensions and rendering scale. */
-extern int sim_width;
-extern int sim_height;
-extern int window_scale;
+typedef struct Grid
+{
+    int width;
+    int height;
+    int window_scale;
 
-/*
- * Simulation data:
- *  - grid: current temperature values
- *  - next_grid: next state after simulation step
- *  - source_map: marks permanent heat sources
- */
-extern float *grid;
-extern float *next_grid;
-extern unsigned char *source_map;
+    float *current;
+    float *next;
+    unsigned char *source_map;
+} Grid;
 
 /* Initializes the grid with the given size and scale. */
-void init_grid(int width, int height, int scale);
+void init_grid(Grid *g, int width, int height, int scale);
 
-/* Resets the grid to the initial state (clears and adds center heat source). */
-void reset_grid(void);
+/* Resets the grid to the initial state. */
+void reset_grid(Grid *g);
 
-/* Frees all allocated memory related to the grid. */
-void free_grid(void);
+/* Frees all memory associated with the grid. */
+void free_grid(Grid *g);
 
-/*
- * Adds a permanent heat source at the given position.
- * The source is created within the specified radius.
- */
-void add_heat_source(int mouse_x, int mouse_y, int radius);
+/* Adds a permanent heat source at the given grid position. */
+void add_heat_source(Grid *g, int mouse_x, int mouse_y, int radius);
 
 #endif

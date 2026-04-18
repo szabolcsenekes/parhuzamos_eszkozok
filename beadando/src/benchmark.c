@@ -6,14 +6,25 @@
 #include "util.h"
 #include "opencl_heat.h"
 
-/*
- * Executes one CPU simulation step.
- *
- * Each cell is updated from its four direct neighbors.
- * Border cells are kept at 0.0, while cells marked in source_map
- * remain permanent heat sources with temperature 1.0.
+/* ============================================================
+ * CPU IMPLEMENTATION
+ * ============================================================
  */
-static void run_cpu_step(float *current, float *next, int width, int height)
+
+/*
+ * Executes a single CPU simulation step.
+ *
+ * Each grid cell is updated based on the average of its
+ * four direct neighbors (up, down, left, right).
+ *
+ * Boundary cells are fixed at 0.0 temperature.
+ * Cells marked in source_map remain constant heat sources.
+ */
+static void run_cpu_step(const float *current,
+                         float *next,
+                         const unsigned char *source_map,
+                         int width,
+                         int height)
 {
     for (int y = 0; y < height; y++)
     {
@@ -21,14 +32,14 @@ static void run_cpu_step(float *current, float *next, int width, int height)
         {
             int idx = y * width + x;
 
-            /* Keep the boundary cells cold. */
+            /* Boundary condition: keep edges cold. */
             if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
             {
                 next[idx] = 0.0f;
                 continue;
             }
 
-            /* Keep permanent heat sources at maximum temperature. */
+            /* Preserve permanent heat sources. */
             if (source_map[idx])
             {
                 next[idx] = 1.0f;
@@ -41,23 +52,28 @@ static void run_cpu_step(float *current, float *next, int width, int height)
             float left = current[y * width + (x - 1)];
             float right = current[y * width + (x + 1)];
 
-            /* Compute the new temperature as the average of neighbors. */
+            /* Compute the average temperature. */
             next[idx] = 0.25f * (up + down + left + right);
         }
     }
 }
 
 /*
- * Runs the CPU version of the simulation for a given number of iterations.
+ * Runs the CPU simulation for a given number of iterations.
  *
- * Two buffers are used and swapped after each step to avoid overwriting
- * data that is still needed for the current computation.
+ * Uses double buffering (pointer swapping) to avoid overwriting
+ * data needed for the current iteration.
  */
-static void run_cpu_simulation(float *a, float *b, int width, int height, int iterations)
+static void run_cpu_simulation(float *a,
+                               float *b,
+                               const unsigned char *source_map,
+                               int width,
+                               int height,
+                               int iterations)
 {
     for (int i = 0; i < iterations; i++)
     {
-        run_cpu_step(a, b, width, height);
+        run_cpu_step(a, b, source_map, width, height);
 
         /* Swap current and next buffers. */
         float *temp = a;
@@ -67,15 +83,17 @@ static void run_cpu_simulation(float *a, float *b, int width, int height, int it
 }
 
 /*
- * Measures the execution time of the CPU implementation.
+ * Measures CPU execution time for the simulation.
  *
- * A fresh local grid is allocated for the benchmark to ensure that
- * each measurement starts from the same initial state.
+ * A fresh local grid is allocated for each measurement to ensure
+ * consistent starting conditions.
  */
-double benchmark_cpu(int iterations)
+double benchmark_cpu(Grid *g, int iterations)
 {
-    float *a = (float *)malloc(sizeof(float) * sim_width * sim_height);
-    float *b = (float *)malloc(sizeof(float) * sim_width * sim_height);
+    int size = g->width * g->height;
+
+    float *a = (float *)malloc(sizeof(float) * size);
+    float *b = (float *)malloc(sizeof(float) * size);
 
     if (a == NULL || b == NULL)
     {
@@ -85,30 +103,33 @@ double benchmark_cpu(int iterations)
         return -1.0;
     }
 
-    /* Initialize both local buffers with zero temperature. */
-    for (int i = 0; i < sim_width * sim_height; i++)
+    /* Initialize both local grids with zero temperature. */
+    for (int i = 0; i < size; i++)
     {
         a[i] = 0.0f;
         b[i] = 0.0f;
     }
 
-    /* Place the initial heat source in the center. */
-    int cx = sim_width / 2;
-    int cy = sim_height / 2;
+    /* Create an initial heat source in the center. */
+    int cx = g->width / 2;
+    int cy = g->height / 2;
 
     for (int y = cy - 10; y <= cy + 10; y++)
     {
         for (int x = cx - 10; x <= cx + 10; x++)
         {
-            int idx = y * sim_width + x;
-            a[idx] = 1.0f;
-            b[idx] = 1.0f;
+            if (x >= 0 && x < g->width && y >= 0 && y < g->height)
+            {
+                int idx = y * g->width + x;
+                a[idx] = 1.0f;
+                b[idx] = 1.0f;
+            }
         }
     }
 
     double start = get_time_ms();
 
-    run_cpu_simulation(a, b, sim_width, sim_height, iterations);
+    run_cpu_simulation(a, b, g->source_map, g->width, g->height, iterations);
 
     double end = get_time_ms();
 
@@ -118,38 +139,131 @@ double benchmark_cpu(int iterations)
     return end - start;
 }
 
-/*
- * Measures the execution time of the OpenCL implementation.
- *
- * The simulation state is reset before the measurement, then uploaded
- * to the device. The kernel is executed multiple times without
- * unnecessary host-device transfers between iterations.
+/* ============================================================
+ * OPENCL IMPLEMENTATION (DETAILED BREAKDOWN)
+ * ============================================================
  */
-double benchmark_opencl(int iterations)
+
+/*
+ * Measures OpenCL execution time with phase breakdown.
+ *
+ * The simulation is divided into three main phases:
+ * 1. Upload (host -> device transfer)
+ * 2. Compute (kernel execution)
+ * 3. Download (device -> host transfer)
+ *
+ * This helps identify performance bottlenecks such as
+ * memory transfer overhead.
+ */
+OpenCLBreakdown benchmark_opencl_breakdown(Grid *g, int iterations)
 {
-    reset_grid();
-    upload_state_to_device();
+    OpenCLBreakdown result = {0};
 
-    double start = get_time_ms();
+    /* Reset the simulation to a known initial state. */
+    reset_grid(g);
 
+    /* --- Upload phase --- */
+    double t0 = get_time_ms();
+    upload_state_to_device(g);
+    double t1 = get_time_ms();
+
+    /* --- Compute phase --- */
     for (int i = 0; i < iterations; i++)
     {
-        run_kernel_step_device_only();
+        run_kernel_step_device_only(g);
     }
 
-    /* Ensure that all queued OpenCL operations are finished. */
-    clFinish(queue);
+    finish_opencl();
+    double t2 = get_time_ms();
 
-    double end = get_time_ms();
+    /* --- Download phase --- */
+    download_state_from_device(g);
+    double t3 = get_time_ms();
 
-    /* Download the final state back to host memory. */
-    download_state_from_device();
+    result.upload_ms = t1 - t0;
+    result.compute_ms = t2 - t1;
+    result.download_ms = t3 - t2;
+    result.total_ms = t3 - t0;
 
-    return end - start;
+    return result;
 }
 
 /*
- * Creates the CSV file and writes its header if the file does not exist yet.
+ * Compatibility wrapper: returns total OpenCL time only.
+ */
+double benchmark_opencl(Grid *g, int iterations)
+{
+    OpenCLBreakdown result = benchmark_opencl_breakdown(g, iterations);
+    return result.total_ms;
+}
+
+/* ============================================================
+ * AVERAGING FUNCTIONS
+ * ============================================================
+ */
+
+/*
+ * Computes average CPU execution time over multiple runs.
+ */
+double benchmark_cpu_avg(Grid *g, int iterations, int runs)
+{
+    double sum = 0.0;
+
+    for (int i = 0; i < runs; i++)
+    {
+        sum += benchmark_cpu(g, iterations);
+    }
+
+    return sum / runs;
+}
+
+/*
+ * Computes average OpenCL execution time over multiple runs.
+ */
+double benchmark_opencl_avg(Grid *g, int iterations, int runs)
+{
+    double sum = 0.0;
+
+    for (int i = 0; i < runs; i++)
+    {
+        sum += benchmark_opencl(g, iterations);
+    }
+
+    return sum / runs;
+}
+
+/*
+ * Computes average OpenCL phase breakdown over multiple runs.
+ */
+OpenCLBreakdown benchmark_opencl_breakdown_avg(Grid *g, int iterations, int runs)
+{
+    OpenCLBreakdown avg = {0};
+
+    for (int i = 0; i < runs; i++)
+    {
+        OpenCLBreakdown t = benchmark_opencl_breakdown(g, iterations);
+
+        avg.upload_ms += t.upload_ms;
+        avg.compute_ms += t.compute_ms;
+        avg.download_ms += t.download_ms;
+        avg.total_ms += t.total_ms;
+    }
+
+    avg.upload_ms /= runs;
+    avg.compute_ms /= runs;
+    avg.download_ms /= runs;
+    avg.total_ms /= runs;
+
+    return avg;
+}
+
+/* ============================================================
+ * CSV OUTPUT
+ * ============================================================
+ */
+
+/*
+ * Ensures that the CSV file exists and contains a header row.
  */
 void ensure_csv_header(const char *filename)
 {
@@ -167,14 +281,18 @@ void ensure_csv_header(const char *filename)
         return;
     }
 
-    fprintf(f, "width,height,iterations,cpu_time_ms,opencl_time_ms,speedup\n");
+    fprintf(f,
+            "width,height,iterations,cpu_time_ms,"
+            "upload_ms,compute_ms,download_ms,total_ms,"
+            "speedup_total,speedup_compute\n");
+
     fclose(f);
 }
 
 /*
- * Appends one benchmark result row to the CSV file.
+ * Appends one benchmark result with total OpenCL time.
  *
- * Speedup is computed as CPU time divided by OpenCL time.
+ * This helper keeps compatibility with the old API.
  */
 void save_benchmark_csv(const char *filename,
                         int width,
@@ -183,76 +301,89 @@ void save_benchmark_csv(const char *filename,
                         double cpu_time,
                         double opencl_time)
 {
-    FILE *f = fopen(filename, "a");
+    OpenCLBreakdown ocl;
+    ocl.upload_ms = 0.0;
+    ocl.compute_ms = opencl_time;
+    ocl.download_ms = 0.0;
+    ocl.total_ms = opencl_time;
 
+    save_benchmark_csv_detailed(filename,
+                                width,
+                                height,
+                                iterations,
+                                cpu_time,
+                                ocl);
+}
+
+/*
+ * Appends one benchmark result with detailed OpenCL breakdown
+ * to the CSV file.
+ */
+void save_benchmark_csv_detailed(const char *filename,
+                                 int width,
+                                 int height,
+                                 int iterations,
+                                 double cpu_time,
+                                 OpenCLBreakdown ocl)
+{
+    FILE *f = fopen(filename, "a");
     if (f == NULL)
     {
         printf("Failed to open CSV file: %s\n", filename);
         return;
     }
 
-    double speedup = 0.0;
-    if (opencl_time > 0.0)
+    double speedup_total = 0.0;
+    double speedup_compute = 0.0;
+
+    if (ocl.total_ms > 0.0)
     {
-        speedup = cpu_time / opencl_time;
+        speedup_total = cpu_time / ocl.total_ms;
     }
 
-    fprintf(f, "%d,%d,%d,%.3f,%.3f,%.3f\n",
-            width, height, iterations, cpu_time, opencl_time, speedup);
+    if (ocl.compute_ms > 0.0)
+    {
+        speedup_compute = cpu_time / ocl.compute_ms;
+    }
+
+    fprintf(f, "%d,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+            width,
+            height,
+            iterations,
+            cpu_time,
+            ocl.upload_ms,
+            ocl.compute_ms,
+            ocl.download_ms,
+            ocl.total_ms,
+            speedup_total,
+            speedup_compute);
 
     fclose(f);
 }
 
-/*
- * Runs a simple automated benchmark on the current simulation size
- * using multiple iteration counts.
+/* ============================================================
+ * BENCHMARK RUNNER
+ * ============================================================
  */
-void run_automated_benchmarks(const char *filename)
-{
-    int test_iterations[] = {10, 50, 100, 500, 1000, 2000, 5000, 10000};
-    int test_count = sizeof(test_iterations) / sizeof(test_iterations[0]);
-
-    ensure_csv_header(filename);
-
-    printf("\n=== Automated benchmark started ===\n");
-
-    for (int i = 0; i < test_count; i++)
-    {
-        int iterations = test_iterations[i];
-
-        printf("\n[Benchmark] Iterations: %d\n", iterations);
-
-        double cpu_time = benchmark_cpu(iterations);
-        double opencl_time = benchmark_opencl(iterations);
-
-        printf("CPU time:    %.3f ms\n", cpu_time);
-        printf("OpenCL time: %.3f ms\n", opencl_time);
-
-        if (opencl_time > 0.0)
-        {
-            printf("Speedup:     %.2fx\n", cpu_time / opencl_time);
-        }
-
-        save_benchmark_csv(filename,
-                           sim_width, sim_height, iterations, cpu_time, opencl_time);
-    }
-
-    printf("\n=== Automated benchmark finished ===\n");
-}
 
 /*
  * Runs averaged benchmarks for multiple grid sizes.
  *
- * For each size, the simulation grid and OpenCL environment are reinitialized,
- * then both CPU and OpenCL versions are measured multiple times and averaged.
+ * For each size:
+ * - reinitializes the simulation grid
+ * - reinitializes the OpenCL environment
+ * - measures CPU and OpenCL performance
+ * - saves results to CSV
  */
 void run_multi_size_benchmarks(const char *filename)
 {
     int sizes[] = {64, 128, 256, 512, 1024};
     int iterations = 500;
-    int runs = 200;
+    int runs = 50;
 
-    int count = sizeof(sizes) / sizeof(sizes[0]);
+    int count = (int)(sizeof(sizes) / sizeof(sizes[0]));
+
+    Grid grid_state = {0};
 
     ensure_csv_header(filename);
 
@@ -265,61 +396,38 @@ void run_multi_size_benchmarks(const char *filename)
         printf("\n[Benchmark] %dx%d, iter=%d, runs=%d\n",
                size, size, iterations, runs);
 
-        /* Recreate the simulation state for the current test size. */
-        free_grid();
-        cleanup_opencl();
+        init_grid(&grid_state, size, size, 1);
+        init_opencl(&grid_state);
 
-        init_grid(size, size, 1);
-        init_opencl();
+        double cpu_time = benchmark_cpu_avg(&grid_state, iterations, runs);
+        OpenCLBreakdown ocl = benchmark_opencl_breakdown_avg(&grid_state, iterations, runs);
 
-        double cpu_time = benchmark_cpu_avg(iterations, runs);
-        double opencl_time = benchmark_opencl_avg(iterations, runs);
+        printf("CPU avg:         %.3f ms\n", cpu_time);
+        printf("OpenCL upload:   %.3f ms\n", ocl.upload_ms);
+        printf("OpenCL compute:  %.3f ms\n", ocl.compute_ms);
+        printf("OpenCL download: %.3f ms\n", ocl.download_ms);
+        printf("OpenCL total:    %.3f ms\n", ocl.total_ms);
 
-        printf("CPU avg:    %.3f ms\n", cpu_time);
-        printf("OpenCL avg: %.3f ms\n", opencl_time);
-
-        if (opencl_time > 0.0)
+        if (ocl.total_ms > 0.0)
         {
-            printf("Speedup:    %.2fx\n", cpu_time / opencl_time);
+            printf("Speedup total:   %.2fx\n", cpu_time / ocl.total_ms);
         }
 
-        save_benchmark_csv(filename,
-                           sim_width, sim_height,
-                           iterations,
-                           cpu_time, opencl_time);
+        if (ocl.compute_ms > 0.0)
+        {
+            printf("Speedup compute: %.2fx\n", cpu_time / ocl.compute_ms);
+        }
+
+        save_benchmark_csv_detailed(filename,
+                                    grid_state.width,
+                                    grid_state.height,
+                                    iterations,
+                                    cpu_time,
+                                    ocl);
+
+        cleanup_opencl();
+        free_grid(&grid_state);
     }
 
     printf("\n=== Benchmark finished ===\n");
-}
-
-/*
- * Computes the average CPU benchmark time over multiple runs.
- */
-double benchmark_cpu_avg(int iterations, int runs)
-{
-    double sum = 0.0;
-
-    for (int i = 0; i < runs; i++)
-    {
-        double t = benchmark_cpu(iterations);
-        sum += t;
-    }
-
-    return sum / runs;
-}
-
-/*
- * Computes the average OpenCL benchmark time over multiple runs.
- */
-double benchmark_opencl_avg(int iterations, int runs)
-{
-    double sum = 0.0;
-
-    for (int i = 0; i < runs; i++)
-    {
-        double t = benchmark_opencl(iterations);
-        sum += t;
-    }
-
-    return sum / runs;
 }

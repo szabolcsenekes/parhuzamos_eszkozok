@@ -2,6 +2,7 @@
 #define RENDERER_H
 
 #include <SDL2/SDL.h>
+#include "grid.h"
 
 /*
  * Renderer module
@@ -11,16 +12,11 @@
  * and cleaning up rendering resources.
  */
 
-/* SDL objects used for rendering. */
-extern SDL_Window *window;
-extern SDL_Renderer *renderer;
-extern SDL_Texture *texture;
-
 /* Initializes SDL, creates window, renderer, and texture. */
-void init_sdl(void);
+void init_sdl(const Grid *g);
 
 /* Renders the current simulation state to the window. */
-void render(void);
+void render(const Grid *g);
 
 /* Releases all SDL-related resources. */
 void cleanup_sdl(void);

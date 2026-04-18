@@ -4,8 +4,10 @@
 
 A projekt egy 2 dimenziós hőterjedési szimulációt valósít meg C
 nyelven.
-A számítás kétféleképpen történik: - Szekvenciális CPU megoldással -
-Párhuzamos OpenCL (GPU) megoldással
+A számítás kétféleképpen történik:
+
+- Szekvenciális CPU megoldással
+- Párhuzamos OpenCL (GPU) megoldással
 
 A cél a két megközelítés teljesítményének összehasonlítása.
 A szimuláció valós időben jelenik meg SDL2 segítségével.
@@ -27,9 +29,10 @@ A szimuláció valós időben jelenik meg SDL2 segítségével.
 A modell egy 2D rácson alapul, ahol minden cella egy hőmérséklet értéket
 tárol.
 
-Minden iterációban: - A cella új értéke a négy szomszéd (fel, le, bal,
-jobb) átlaga
-- A szélső cellák hőmérséklete 0.0 (hideg peremfeltétel)
+Minden iterációban:
+
+- A cella új értéke a négy szomszéd átlaga
+- A szélső cellák hőmérséklete 0.0
 - A hőforrás cellák értéke állandóan 1.0
 
 Ez egy egyszerű hődiffúziós folyamatot modellez.
@@ -104,14 +107,6 @@ Az eredmények: `data/outputs.csv`
 
 ------------------------------------------------------------------------
 
-## Példa eredmény
-
-    CPU time: 207.765 ms
-    OpenCL time: 78.333 ms
-    Speedup: 2.65x
-
-------------------------------------------------------------------------
-
 ## Fordítás és futtatás
 
     make
@@ -121,75 +116,91 @@ Az eredmények: `data/outputs.csv`
 
 ## Átlagos teljesítmény (500 iteráció)
 
-| Méret       | CPU (ms) | OpenCL (ms) | Gyorsulás |
-|------------|---------|------------|----------|
-| 128×128     | ~13.4   | ~179.1     | 0.07x    |
-| 256×256     | ~51.3   | ~37.6      | 1.36x    |
-| 512×512     | ~230.0  | ~110.0     | ~2.1x    |
-| 1024×1024   | ~834.7  | ~167.2     | ~4.9x    |
-
-### Megfigyelések
-
--   Kis méret esetén a GPU lassabb a magas inicializációs költségek
-    miatt
--   Közepes mérettől kezdve a GPU előnybe kerül
--   Nagy méretnél jelentős gyorsulás figyelhető meg
+| Méret       | CPU (ms) | OpenCL total (ms) | Compute (ms) | Gyorsulás |
+|------------|---------|------------------|-------------|----------|
+| 64×64       | ~3.5    | ~54              | ~54         | 0.06x    |
+| 128×128     | ~15     | ~59              | ~59         | 0.25x    |
+| 256×256     | ~57     | ~67              | ~67         | 0.85x    |
+| 512×512     | ~229    | ~96              | ~95         | 2.4x     |
+| 1024×1024   | ~915    | ~272             | ~270        | 3.3–4.3x |
 
 ------------------------------------------------------------------------
 
-## Iterációszám hatása (256×256)
+## Megfigyelések
 
-| Iteráció | CPU (ms) | OpenCL (ms) | Gyorsulás |
-|----------|---------|------------|----------|
-| 100      | 9.82    | 11.48      | 0.85x    |
-| 500      | ~51.3   | ~37.6      | 1.36x    |
-| 1000     | 99.72   | 66.48      | 1.50x    |
-| 2000     | 188.85  | 233.53     | 0.81x    |
+- Kis rácsméret esetén a GPU jelentősen lassabb a CPU-nál.
+- Ennek oka a kernel indítási és adatmozgatási overhead.
+- Közepes méretnél (256×256) a teljesítmény közel azonos.
+- Nagyobb méretnél (512×512 felett) a GPU egyértelmű előnybe kerül.
+- A maximális gyorsulás ~4x körül alakult.
 
-### Megfigyelések
+### Memória másolás hatása
 
--   Kevés iterációnál a GPU nem hatékony
--   Közepes iterációszámnál javul a teljesítmény
--   Nagyon sok iterációnál a memória-másolás költsége dominálhat
+A mérések alapján:
 
-------------------------------------------------------------------------
+- Az adatmásolás (upload + download) viszonylag kicsi időt vesz igénybe
+  (~1–3 ms nagy méreteknél).
+- A teljes futási időt főként a kernel futás (compute) dominálja.
+- A compute-only gyorsulás valamivel nagyobb, mint a teljes gyorsulás.
 
-## Skálázódás (1000 iteráció)
+Ez azt mutatja, hogy:
+> a jelen implementációban a GPU számítás dominál, nem az adatmásolás.
 
-| Méret       | CPU (ms) | OpenCL (ms) | Gyorsulás |
-|------------|---------|------------|----------|
-| 64×64       | 6.22    | 49.54      | 0.13x    |
-| 128×128     | 24.96   | 53.54      | 0.47x    |
-| 256×256     | 99.72   | 66.48      | 1.50x    |
-| 512×512     | 419.86  | 133.44     | 3.15x    |
-| 1024×1024   | 1785.21 | 350.62     | 5.09x    |
+### Skálázódás
 
-### Megfigyelések
+- A CPU futási ideje közel lineárisan nő a rács méretével.
+- A GPU futási ideje lassabban nő.
+- Emiatt a gyorsulás a mérettel együtt növekszik.
 
--   A GPU overhead dominál kis problémaméreteknél
--   A gyorsulás közel lineárisan nő a mérettel
--   Nagy adathalmazok esetén a GPU jelentős előnyt biztosít
+Ez megfelel az elméleti várakozásoknak.
 
 ------------------------------------------------------------------------
 
-## Legjobb mért eredmények
+## OpenCL futás felbontása
 
-| Méret       | CPU (ms) | OpenCL (ms) | Gyorsulás |
-|------------|---------|------------|----------|
-| 1024×1024   | 1977.19 | 317.65     | 6.22x    |
-| 1024×1024   | 1963.91 | 321.65     | 6.10x    |
-| 1024×1024   | 1785.21 | 350.62     | 5.09x    |
-| 1024×1024   | 834.59  | 167.38     | 4.99x    |
+A GPU futási idő három részre bontható:
+
+- Upload (CPU → GPU)
+- Compute (kernel futás)
+- Download (GPU → CPU)
+
+Példa (1024×1024):
+
+- Upload: ~2.5 ms
+- Compute: ~270 ms
+- Download: ~0.9 ms
+
+Megfigyelés:
+
+- A compute dominál (a teljes futási idő döntő részét teszi ki)
+- Az adatmozgatás költsége elhanyagolható ebben a méretben
+
+A kernel futtatása során kézi work-group méret (pl. 16×16) került
+beállításra, amely stabil teljesítményt eredményezett.
+
+------------------------------------------------------------------------
+
+## Hardver konfiguráció
+
+A mérések az alábbi rendszeren készültek:
+
+- CPU: AMD Ryzen 5 5600H
+- GPU: AMD Radeon(TM) Graphics (Vega, 512 cores)
+- OpenCL: 1.2
+- RAM: 512 MB GPU shared memory
+- Driver: AMD Adrenalin 23.4.2
+
+A GPU integrált (iGPU), ezért a memória CPU és GPU között megosztott.
 
 ------------------------------------------------------------------------
 
 ## Összegzés
 
--   A GPU kis méretű problémáknál nem hatékony
--   A teljesítményelőny a rácsméret növekedésével nő
--   A legnagyobb mért gyorsulás ~6x volt
--   A memória-kezelés és adatmásolás jelentős hatással van a
-    teljesítményre
+- A GPU kis problémaméreteknél nem hatékony
+- A teljesítményelőny a rácsméret növekedésével nő
+- A maximális gyorsulás ~4x volt
+- Az OpenCL implementáció jelentős gyorsulást biztosít nagy méretű rácsok esetén
+- A számítási időt elsősorban a kernel futása határozza meg
 
 ------------------------------------------------------------------------
 
@@ -199,3 +210,6 @@ Az OpenCL alapú párhuzamosítás különösen nagy méretű rácsok esetén
 hatékony.
 A CPU implementáció kisebb problémák esetén versenyképesebb lehet,
 azonban a GPU jelentős gyorsulást biztosít nagy számítási igény mellett.
+A mérési eredmények alapján megállapítható, hogy a gyorsulás mértékét
+nemcsak a párhuzamos számítás, hanem a GPU kihasználtsága és a
+probléma mérete is jelentősen befolyásolja.

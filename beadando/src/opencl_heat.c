@@ -7,16 +7,18 @@
 #include "grid.h"
 #include "opencl_heat.h"
 
-/* OpenCL objects used by the simulation. */
-cl_context context = NULL;
-cl_command_queue queue = NULL;
-cl_program program = NULL;
-cl_kernel kernel = NULL;
-cl_mem d_current = NULL;
-cl_mem d_next = NULL;
-cl_mem d_source_map = NULL;
-cl_mem d_current_active = NULL;
-cl_mem d_next_active = NULL;
+/* OpenCL objects used internally by the module. */
+static cl_context context = NULL;
+static cl_command_queue queue = NULL;
+static cl_program program = NULL;
+static cl_kernel kernel = NULL;
+
+static cl_mem d_current = NULL;
+static cl_mem d_next = NULL;
+static cl_mem d_source_map = NULL;
+
+static cl_mem d_current_active = NULL;
+static cl_mem d_next_active = NULL;
 
 /*
  * Loads the OpenCL kernel source code from a file into a dynamically
@@ -70,8 +72,8 @@ static char *load_kernel_source(const char *filename)
 /*
  * Prints the OpenCL program build log.
  *
- * This is especially useful when kernel compilation fails, because it
- * provides detailed compiler messages from the OpenCL driver.
+ * This is especially useful when kernel compilation fails,
+ * because it provides detailed compiler messages from the OpenCL driver.
  */
 static void print_build_log(cl_program prog, cl_device_id device)
 {
@@ -99,7 +101,7 @@ static void print_build_log(cl_program prog, cl_device_id device)
  * - loads and builds the kernel program,
  * - creates the device buffers needed by the simulation.
  */
-void init_opencl(void)
+void init_opencl(const Grid *g)
 {
     cl_int err;
     cl_platform_id platform = NULL;
@@ -174,8 +176,9 @@ void init_opencl(void)
     /* Allocate device buffer for the current temperature grid. */
     d_current = clCreateBuffer(context,
                                CL_MEM_READ_WRITE,
-                               sizeof(float) * sim_width * sim_height,
-                               NULL, &err);
+                               sizeof(float) * g->width * g->height,
+                               NULL,
+                               &err);
     if (err != CL_SUCCESS || d_current == NULL)
     {
         printf("Error: failed to create d_current buffer.\n");
@@ -186,8 +189,9 @@ void init_opencl(void)
     /* Allocate device buffer for the next temperature grid. */
     d_next = clCreateBuffer(context,
                             CL_MEM_READ_WRITE,
-                            sizeof(float) * sim_width * sim_height,
-                            NULL, &err);
+                            sizeof(float) * g->width * g->height,
+                            NULL,
+                            &err);
     if (err != CL_SUCCESS || d_next == NULL)
     {
         printf("Error: failed to create d_next buffer.\n");
@@ -198,8 +202,9 @@ void init_opencl(void)
     /* Allocate device buffer for the permanent heat source map. */
     d_source_map = clCreateBuffer(context,
                                   CL_MEM_READ_WRITE,
-                                  sizeof(unsigned char) * sim_width * sim_height,
-                                  NULL, &err);
+                                  sizeof(unsigned char) * g->width * g->height,
+                                  NULL,
+                                  &err);
     if (err != CL_SUCCESS || d_source_map == NULL)
     {
         printf("Error: failed to create d_source_map buffer.\n");
@@ -222,16 +227,37 @@ void init_opencl(void)
  * - next temperature grid
  * - permanent heat source map
  */
-void upload_state_to_device(void)
+void upload_state_to_device(const Grid *g)
 {
-    clEnqueueWriteBuffer(queue, d_current, CL_TRUE, 0,
-                         sizeof(float) * sim_width * sim_height, grid, 0, NULL, NULL);
+    clEnqueueWriteBuffer(queue,
+                         d_current,
+                         CL_TRUE,
+                         0,
+                         sizeof(float) * g->width * g->height,
+                         g->current,
+                         0,
+                         NULL,
+                         NULL);
 
-    clEnqueueWriteBuffer(queue, d_next, CL_TRUE, 0,
-                         sizeof(float) * sim_width * sim_height, next_grid, 0, NULL, NULL);
+    clEnqueueWriteBuffer(queue,
+                         d_next,
+                         CL_TRUE,
+                         0,
+                         sizeof(float) * g->width * g->height,
+                         g->next,
+                         0,
+                         NULL,
+                         NULL);
 
-    clEnqueueWriteBuffer(queue, d_source_map, CL_TRUE, 0,
-                         sizeof(unsigned char) * sim_width * sim_height, source_map, 0, NULL, NULL);
+    clEnqueueWriteBuffer(queue,
+                         d_source_map,
+                         CL_TRUE,
+                         0,
+                         sizeof(unsigned char) * g->width * g->height,
+                         g->source_map,
+                         0,
+                         NULL,
+                         NULL);
 
     /* Reset active device buffers before starting a new simulation phase. */
     d_current_active = d_current;
@@ -244,22 +270,82 @@ void upload_state_to_device(void)
  * After kernel execution, the active input and output buffers are swapped,
  * so the next iteration can continue without extra host-device copies.
  */
-void run_kernel_step_device_only(void)
+void run_kernel_step_device_only(const Grid *g)
 {
-    size_t global[2] = {(size_t)sim_width, (size_t)sim_height};
+    cl_int err;
 
-    int w = sim_width;
-    int h = sim_height;
+    /*
+     * Try a fixed 16x16 local work-group size.
+     * This is a common choice for 2D grid-based kernels.
+     */
+    size_t local[2] = {16, 16};
+
+    /*
+     * The global size must be a multiple of the local size,
+     * so round up both dimensions if necessary.
+     */
+    size_t global[2];
+    global[0] = ((size_t)g->width + local[0] - 1) / local[0] * local[0];
+    global[1] = ((size_t)g->height + local[1] - 1) / local[1] * local[1];
+
+    int w = g->width;
+    int h = g->height;
 
     /* Pass all required kernel arguments. */
-    clSetKernelArg(kernel, 0, sizeof(cl_mem), &d_current_active);
-    clSetKernelArg(kernel, 1, sizeof(cl_mem), &d_next_active);
-    clSetKernelArg(kernel, 2, sizeof(cl_mem), &d_source_map);
-    clSetKernelArg(kernel, 3, sizeof(int), &w);
-    clSetKernelArg(kernel, 4, sizeof(int), &h);
+    err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &d_current_active);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clSetKernelArg(0) failed.\n");
+        exit(1);
+    }
 
-    /* Launch the kernel over the full 2D simulation grid. */
-    clEnqueueNDRangeKernel(queue, kernel, 2, NULL, global, NULL, 0, NULL, NULL);
+    err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &d_next_active);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clSetKernelArg(1) failed.\n");
+        exit(1);
+    }
+
+    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &d_source_map);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clSetKernelArg(2) failed.\n");
+        exit(1);
+    }
+
+    err = clSetKernelArg(kernel, 3, sizeof(int), &w);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clSetKernelArg(3) failed.\n");
+        exit(1);
+    }
+
+    err = clSetKernelArg(kernel, 4, sizeof(int), &h);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clSetKernelArg(4) failed.\n");
+        exit(1);
+    }
+
+    /*
+     * Launch the kernel over the padded global range
+     * using the selected local work-group size.
+     */
+    err = clEnqueueNDRangeKernel(queue,
+                                 kernel,
+                                 2,
+                                 NULL,
+                                 global,
+                                 local,
+                                 0,
+                                 NULL,
+                                 NULL);
+    if (err != CL_SUCCESS)
+    {
+        printf("Error: clEnqueueNDRangeKernel failed (%d).\n", err);
+        exit(1);
+    }
+
     clFinish(queue);
 
     /* Swap active device buffers after the step. */
@@ -273,10 +359,17 @@ void run_kernel_step_device_only(void)
  *
  * The most recent state is always stored in d_current_active.
  */
-void download_state_from_device(void)
+void download_state_from_device(Grid *g)
 {
-    clEnqueueReadBuffer(queue, d_current_active, CL_TRUE, 0,
-                        sizeof(float) * sim_width * sim_height, grid, 0, NULL, NULL);
+    clEnqueueReadBuffer(queue,
+                        d_current_active,
+                        CL_TRUE,
+                        0,
+                        sizeof(float) * g->width * g->height,
+                        g->current,
+                        0,
+                        NULL,
+                        NULL);
 }
 
 /*
@@ -285,11 +378,22 @@ void download_state_from_device(void)
  * This version is mainly useful for interactive rendering, where the updated
  * grid needs to be displayed after each iteration.
  */
-void run_kernel(void)
+void run_kernel(Grid *g)
 {
-    upload_state_to_device();
-    run_kernel_step_device_only();
-    download_state_from_device();
+    upload_state_to_device(g);
+    run_kernel_step_device_only(g);
+    download_state_from_device(g);
+}
+
+/*
+ * Blocks until all queued OpenCL commands have completed.
+ */
+void finish_opencl(void)
+{
+    if (queue != NULL)
+    {
+        clFinish(queue);
+    }
 }
 
 /*

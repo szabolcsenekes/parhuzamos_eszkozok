@@ -2,13 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <SDL2/SDL.h>
+
 #include "renderer.h"
 #include "grid.h"
 
-/* SDL objects used for window creation and rendering. */
-SDL_Window *window = NULL;
-SDL_Renderer *renderer = NULL;
-SDL_Texture *texture = NULL;
+/* SDL objects used internally by the renderer module. */
+static SDL_Window *window = NULL;
+static SDL_Renderer *renderer = NULL;
+static SDL_Texture *texture = NULL;
 
 /*
  * Converts a normalized temperature value in the range [0, 1]
@@ -40,10 +41,10 @@ static void heat_to_color(float t, Uint8 *r, Uint8 *g, Uint8 *b)
  * Initializes SDL and creates the window, renderer, and texture
  * used for displaying the simulation.
  *
- * The window size is based on the simulation dimensions and the
+ * The window size is based on the grid dimensions and the
  * selected rendering scale.
  */
-void init_sdl(void)
+void init_sdl(const Grid *g)
 {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
     {
@@ -55,8 +56,8 @@ void init_sdl(void)
         "Heat Simulation",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-        sim_width * window_scale,
-        sim_height * window_scale,
+        g->width * g->window_scale,
+        g->height * g->window_scale,
         0);
 
     if (window == NULL)
@@ -80,8 +81,8 @@ void init_sdl(void)
         renderer,
         SDL_PIXELFORMAT_RGB24,
         SDL_TEXTUREACCESS_STREAMING,
-        sim_width,
-        sim_height);
+        g->width,
+        g->height);
 
     if (texture == NULL)
     {
@@ -96,7 +97,7 @@ void init_sdl(void)
  * Each cell of the temperature grid is converted to an RGB color
  * and written into the texture pixel buffer, which is then displayed.
  */
-void render(void)
+void render(const Grid *g)
 {
     Uint8 *pixels;
     int pitch;
@@ -107,19 +108,19 @@ void render(void)
         return;
     }
 
-    for (int y = 0; y < sim_height; y++)
+    for (int y = 0; y < g->height; y++)
     {
-        for (int x = 0; x < sim_width; x++)
+        for (int x = 0; x < g->width; x++)
         {
-            int idx = y * sim_width + x;
-            Uint8 r, g, b;
+            int idx = y * g->width + x;
+            Uint8 r, g_col, b;
 
             /* Convert the current temperature value to a display color. */
-            heat_to_color(grid[idx], &r, &g, &b);
+            heat_to_color(g->current[idx], &r, &g_col, &b);
 
             int offset = y * pitch + x * 3;
             pixels[offset] = r;
-            pixels[offset + 1] = g;
+            pixels[offset + 1] = g_col;
             pixels[offset + 2] = b;
         }
     }
@@ -137,12 +138,13 @@ void render(void)
  */
 void cleanup_sdl(void)
 {
-    if (texture)
+    if (texture != NULL)
         SDL_DestroyTexture(texture);
-    if (renderer)
+    if (renderer != NULL)
         SDL_DestroyRenderer(renderer);
-    if (window)
+    if (window != NULL)
         SDL_DestroyWindow(window);
+
     SDL_Quit();
 
     texture = NULL;

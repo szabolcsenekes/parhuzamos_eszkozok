@@ -1,38 +1,21 @@
-#include <windows.h>
+#include <SDL2/SDL.h>
 #include "util.h"
 
 /*
- * Returns the current time in milliseconds using a high-resolution timer.
+ * Returns the current time in milliseconds using SDL's high-resolution timer.
  *
- * This function uses Windows' QueryPerformanceCounter API, which provides
- * much higher precision than standard timers like clock() or time().
- *
- * The frequency of the performance counter is queried only once and stored
- * statically for efficiency.
+ * This implementation is platform-independent and works on Windows,
+ * Linux, and macOS as long as SDL2 is available.
  */
 double get_time_ms(void)
 {
-    static LARGE_INTEGER frequency;
-    static int initialized = 0;
+    Uint64 counter = SDL_GetPerformanceCounter();
+    Uint64 frequency = SDL_GetPerformanceFrequency();
 
-    /*
-     * Initialize the frequency only once.
-     * This value represents counts per second.
-     */
-    if (!initialized)
+    if (frequency == 0)
     {
-        QueryPerformanceFrequency(&frequency);
-        initialized = 1;
+        return 0.0;
     }
 
-    LARGE_INTEGER counter;
-
-    /* Get the current counter value. */
-    QueryPerformanceCounter(&counter);
-
-    /*
-     * Convert counter value to milliseconds:
-     * (counts / counts_per_second) * 1000
-     */
-    return (double)(counter.QuadPart * 1000.0 / frequency.QuadPart);
+    return (double)counter * 1000.0 / (double)frequency;
 }
