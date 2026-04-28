@@ -126,6 +126,14 @@ Az eredmények: `data/outputs.csv`
 
 ------------------------------------------------------------------------
 
+## Grafikonok
+
+![CPU és GPU átlagos idő](images/grafikon1.png)
+
+![Gyorsulás](images/grafikon2.png)
+
+------------------------------------------------------------------------
+
 ## Megfigyelések
 
 - Kis rácsméret esetén a GPU jelentősen lassabb a CPU-nál.
